@@ -87,7 +87,7 @@ class MicrosoftClient:
 
     def _extract_code_with_keywords(self, content: str) -> Optional[str]:
         """
-        Ищет 6 цифр после ключевых фраз (например, 'Codice di sicurezza:').
+        Ищет 6 цифр после ключевых фраз (например, 'Codice di sicurezza:' или 'Код безопасности:').
         Игнорирует возможные HTML-теги между фразой и цифрами.
         """
         if not content:
@@ -107,8 +107,10 @@ class MicrosoftClient:
             r'code\s+de\s+sécurité\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
             # немецкий
             r'Bestätigungscode\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
-            # русский
-            r'код\s+подтверждения\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
+            # русский (добавлены варианты)
+            r'Код\s+безопасности\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
+            r'код\s+безопасности\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
+            r'код\s+подтверждения\s*:\s*(?:<[^>]*>)*\s*(\d{6})',   # на всякий случай
         ]
 
         for pattern in patterns:
@@ -123,14 +125,10 @@ class MicrosoftClient:
         """
         Ищет любые 6 цифр, но не возвращает коды цветов (#RRGGBB).
         """
-        # Ищем все вхождения 6 цифр
         matches = re.finditer(r'\d{6}', content)
         for match in matches:
             start = match.start()
-            # Проверим, не является ли это цветом: перед цифрами должен быть символ '#'
             if start > 0 and content[start - 1] == '#':
                 continue
-            # Также можно проверить, что цифры не являются частью более длинного числа
-            # (границы слова не нужны, т.к. \d{6} уже даёт ровно 6 цифр)
             return match.group()
         return None
