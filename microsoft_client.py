@@ -2,6 +2,7 @@ import requests
 import time
 import re
 from typing import Optional, List, Dict
+from email.utils import parsedate_to_datetime
 
 class MicrosoftClient:
     def __init__(self, api_key: str):
@@ -43,6 +44,25 @@ class MicrosoftClient:
             print(f"❌ Ошибка получения списка писем: {e}")
             return []
 
+    @staticmethod
+    def _get_message_timestamp(message: Dict) -> int:
+        """
+        Извлекает timestamp из сообщения: сначала пробует числовое поле 'timestamp',
+        затем парсит строку 'date' (RFC 2822), возвращает 0, если ничего не подошло.
+        """
+        ts = message.get('timestamp')
+        if ts and isinstance(ts, (int, float)):
+            return int(ts)
+        date_str = message.get('date')
+        if date_str:
+            try:
+                # Парсим строку типа "Fri, 30 Apr 2026 09:52:00 GMT"
+                dt = parsedate_to_datetime(date_str)
+                return int(dt.timestamp())
+            except Exception:
+                pass
+        return 0
+
     def find_microsoft_code(self, email: str, password: str, attempts: int = 2, interval_first: int = 7, interval_second: int = 8) -> Optional[str]:
         intervals = [interval_first, interval_second]
 
@@ -53,31 +73,29 @@ class MicrosoftClient:
                 print("⚠️ Нет писем или ошибка получения")
                 continue
 
-            # Сортировка по timestamp (от новых к старым), None -> 0
-            messages.sort(key=lambda m: m.get('timestamp') or 0, reverse=True)
+            # Сортировка по убыванию даты (новые первыми)
+            messages.sort(key=self._get_message_timestamp, reverse=True)
 
-            print(f"📬 Получено {len(messages)} писем (отсортированы по убыванию timestamp)")
+            print(f"📬 Получено {len(messages)} писем (отсортированы по дате)")
             for idx, msg in enumerate(messages):
-                print(f"   Письмо {idx+1}: timestamp={msg.get('timestamp')}, from={msg.get('from')[:50]}")
+                print(f"   Письмо {idx+1}: date={msg.get('date')}, from={msg.get('from')[:50]}")
 
-            # Ищем код в письмах, начиная с самого свежего
             for message in messages:
                 sender = message.get('from', '').lower()
                 if 'accountprotection.microsoft.com' not in sender:
                     continue
 
-                print(f"📧 Найдено письмо от Microsoft. Отправитель: {sender}")
+                print(f"📧 Найдено письмо от Microsoft. Отправитель: {sender[:80]}")
                 body_html = message.get('body_html', '')
                 body_text = message.get('body_text', '')
                 content = body_html or body_text
 
-                # Поиск кода: сначала по ключевым словам, потом любые 6 цифр
                 code = self._extract_code_with_keywords(content)
                 if not code:
                     code = self._extract_any_six_digits(content)
 
                 if code:
-                    print(f"✅ Код найден в письме с timestamp={message.get('timestamp')}: {code}")
+                    print(f"✅ Код найден в письме от {message.get('date')}: {code}")
                     return code
                 else:
                     print("⚠️ Код не найден в этом письме, проверяем следующее...")
@@ -95,19 +113,13 @@ class MicrosoftClient:
             return None
 
         patterns = [
-            # итальянский
             r'Codice\s+di\s+sicurezza\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
             r'codice\s+di\s+sicurezza\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
-            # английский
             r'security\s+code\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
             r'verification\s+code\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
-            # испанский
             r'código\s+de\s+seguridad\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
-            # французский
             r'code\s+de\s+sécurité\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
-            # немецкий
             r'Bestätigungscode\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
-            # русский
             r'Код\s+безопасности\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
             r'код\s+безопасности\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
             r'код\s+подтверждения\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
