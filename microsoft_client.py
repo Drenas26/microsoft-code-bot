@@ -53,29 +53,34 @@ class MicrosoftClient:
                 print("⚠️ Нет писем или ошибка получения")
                 continue
 
-            # Сортируем по timestamp (новые первыми)
-            messages.sort(key=lambda m: m.get('timestamp', 0), reverse=True)
+            # Сортировка по timestamp (от новых к старым), None -> 0
+            messages.sort(key=lambda m: m.get('timestamp') or 0, reverse=True)
 
+            print(f"📬 Получено {len(messages)} писем (отсортированы по убыванию timestamp)")
+            for idx, msg in enumerate(messages):
+                print(f"   Письмо {idx+1}: timestamp={msg.get('timestamp')}, from={msg.get('from')[:50]}")
+
+            # Ищем код в письмах, начиная с самого свежего
             for message in messages:
                 sender = message.get('from', '').lower()
-                if 'accountprotection.microsoft.com' in sender:
-                    print(f"📧 Найдено письмо от Microsoft. Отправитель: {sender}")
-                    body_html = message.get('body_html', '')
-                    body_text = message.get('body_text', '')
-                    content = body_html or body_text
+                if 'accountprotection.microsoft.com' not in sender:
+                    continue
 
-                    # 1. Поиск кода по ключевым словам (с учётом HTML-тегов)
-                    code = self._extract_code_with_keywords(content)
-                    if code:
-                        print(f"✅ Код найден (по ключевым словам) на попытке {attempt}: {code}")
-                        return code
-                    # 2. Запасной вариант: любые 6 цифр (но исключая цвета #RRGGBB)
+                print(f"📧 Найдено письмо от Microsoft. Отправитель: {sender}")
+                body_html = message.get('body_html', '')
+                body_text = message.get('body_text', '')
+                content = body_html or body_text
+
+                # Поиск кода: сначала по ключевым словам, потом любые 6 цифр
+                code = self._extract_code_with_keywords(content)
+                if not code:
                     code = self._extract_any_six_digits(content)
-                    if code:
-                        print(f"✅ Код найден (как просто 6 цифр) на попытке {attempt}: {code}")
-                        return code
-                    else:
-                        print("⚠️ Код не найден в письме")
+
+                if code:
+                    print(f"✅ Код найден в письме с timestamp={message.get('timestamp')}: {code}")
+                    return code
+                else:
+                    print("⚠️ Код не найден в этом письме, проверяем следующее...")
 
             if attempt < attempts:
                 wait_time = intervals[attempt - 1]
@@ -86,14 +91,9 @@ class MicrosoftClient:
         return None
 
     def _extract_code_with_keywords(self, content: str) -> Optional[str]:
-        """
-        Ищет 6 цифр после ключевых фраз (например, 'Codice di sicurezza:' или 'Код безопасности:').
-        Игнорирует возможные HTML-теги между фразой и цифрами.
-        """
         if not content:
             return None
 
-        # Паттерны для разных языков с учётом HTML-тегов
         patterns = [
             # итальянский
             r'Codice\s+di\s+sicurezza\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
@@ -107,24 +107,20 @@ class MicrosoftClient:
             r'code\s+de\s+sécurité\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
             # немецкий
             r'Bestätigungscode\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
-            # русский (добавлены варианты)
+            # русский
             r'Код\s+безопасности\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
             r'код\s+безопасности\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
-            r'код\s+подтверждения\s*:\s*(?:<[^>]*>)*\s*(\d{6})',   # на всякий случай
+            r'код\s+подтверждения\s*:\s*(?:<[^>]*>)*\s*(\d{6})',
         ]
 
         for pattern in patterns:
             match = re.search(pattern, content, re.IGNORECASE)
             if match:
                 return match.group(1)
-
         return None
 
     @staticmethod
     def _extract_any_six_digits(content: str) -> Optional[str]:
-        """
-        Ищет любые 6 цифр, но не возвращает коды цветов (#RRGGBB).
-        """
         matches = re.finditer(r'\d{6}', content)
         for match in matches:
             start = match.start()
